@@ -1,6 +1,6 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Viewer} from './Viewer';
-import Chess from 'chess.js';
+import Chess, {ChessInstance} from 'chess.js';
 
 const pgnTalFisch = `
 [Event "Bled-Zagreb-Belgrade Candidates"]
@@ -26,13 +26,27 @@ Qb2 27. Re8 Nf6 28. Qxf6+ Qxf6 29. Rxf6 Kg7 30. Rff8 Ne7
 `.trim();
 
 function App() {
-  // @ts-ignore
-  const board = new Chess();
-  board.load_pgn(pgnTalFisch);
+  const [pgn, setPgn] = useState(pgnTalFisch);
+  const [board, setBoard] = useState(null as ChessInstance|null);
+
+  const playPgn = () => {
+    // @ts-ignore
+    const b = new Chess();
+    b.load_pgn(pgn);
+    setBoard(b);
+  };
 
   return (
     <div className="App">
-    <Viewer game={board} />
+    <div>
+      <textarea value={pgn} style={{height: 400, width: 500}} onChange={e => setPgn(e.target.value)} />
+    </div>
+    <div>
+      <button type="submit" onClick={playPgn}>Play</button>
+    </div>
+    <div>
+      {board && <Viewer game={board as ChessInstance} />}
+    </div>
     </div>
   );
 }

@@ -43,6 +43,7 @@ class Instrument {
   }
 
   public stop() {
+    this.gain.forEach(g => g.gain.value = 0);
     this.osc.forEach(o => o.stop());
   }
 
@@ -222,20 +223,32 @@ function createInstrument(ctx: AudioContext, piece: string, color: string) {
 }
 
 class Orchesstra {
-  ctx: AudioContext;
-  map: Map<string, Instrument>;
-  state: ChessInstance;
+  public readonly ctx: AudioContext;
+  public readonly state: ChessInstance;
+  public readonly startTime: number;
+  private readonly map: Map<string, {move: Move, inst: Instrument}>;
+  private readonly allInsts: Instrument[];
 
   constructor() {
-    this.ctx = new AudioContext();
+    // @ts-ignore
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.map = new Map();
     this.state = newGame();
+    this.startTime = this.ctx.currentTime;
+    this.allInsts = [];
+  }
+
+  public time() {
+    return 1000 * (this.ctx.currentTime - this.startTime);
   }
 
   public shutup() {
-    for (let [k, v] of Array.from(this.map.entries())) {
-      v.stop();
-      this.map.delete(k);
+    while (this.allInsts.length) {
+      const inst = this.allInsts.pop();
+      if (!inst) {
+        continue;
+      }
+      inst.stop();
     }
   }
 
@@ -244,31 +257,35 @@ class Orchesstra {
 
     if (this.map.has(move.to)) {
       // capture!
-      const inst = this.map.get(move.to);
-      if (inst) {
-        inst.stop();
+      const d = this.map.get(move.to);
+      if (d) {
+        d.inst.stop();
       }
     }
 
     if (this.map.has(move.from)) {
-      const inst = this.map.get(move.from);
+      const d = this.map.get(move.from);
+      if (!d) {
+        throw new Error("unknown error");
+      }
       this.map.delete(move.from);
-      this.map.set(move.to, inst as Instrument);
+      this.map.set(move.to, {...d, move});
     } else {
       const inst = createInstrument(this.ctx, move.piece, move.color);
-      this.map.set(move.to, inst);
+      this.allInsts.push(inst);
+      this.map.set(move.to, {move, inst});
     }
 
     this.updateInstruments(move);
   }
 
   private updateInstruments(move: Move) {
-    for (let [pos, inst] of Array.from(this.map.entries())) {
+    for (let [pos, d] of Array.from(this.map.entries())) {
       if (move.to === pos) {
         const freq = getFreq(move.to);
-        inst.setPitch(freq);
-        inst.play();
-      } else {
+        d.inst.setPitch(freq);
+        d.inst.play();
+      } else if (move.color === d.move.color) {
 
         const moves = this.state.moves({square: pos, verbose: true});
         let vol = Math.min(0.5, moves.length / 16);
@@ -277,7 +294,7 @@ class Orchesstra {
           vol += 0.25;
         }
 
-        inst.play(vol)
+        d.inst.play(vol)
 
       }
     }
@@ -309,23 +326,27 @@ function getFreq(pos: string) {
 
 
 export function Viewer({game}: ViewerProps) {
-  const [orch, setOrch] = useState(new Orchesstra());
-  const [startTime, setStartTime] = useState(0);
+  const [ctr, setCtr] = useState(0);
+  const [orch, setOrch] = useState(null as Orchesstra | null);
   const [progress, setProgress] = useState(0);
   const [moveIdx, setMoveIdx] = useState(-1);
 
   useEffect(() => {
     setMoveIdx(-1);
-    setOrch(new Orchesstra());
-    setStartTime(performance.now());
+    const newOrch = new Orchesstra();
+    setOrch(newOrch);
+    return () => newOrch.shutup();
   }, [game]);
 
   useEffect(() => {
+    if (!orch) {
+      return;
+    }
     const raf = requestAnimationFrame(t => {
       const tPerMove = 500;
       const n = game.history().length;
       const tMax = n * tPerMove;
-      const p = (t - startTime) / (tMax);
+      const p = orch.time() / tMax;
       // Termination
       if (p > 1) {
         setProgress(1);
@@ -344,6 +365,7 @@ export function Viewer({game}: ViewerProps) {
       }
 
       setProgress(p);
+      setCtr(ctr + 1);
     });
 
     return () => cancelAnimationFrame(raf);
@@ -355,6 +377,9 @@ export function Viewer({game}: ViewerProps) {
       <div>{moveIdx}</div>
       <pre>
         {JSON.stringify(game.history({verbose: true})[moveIdx])}
+      </pre>
+      <pre>
+        {orch && orch.state.ascii()}
       </pre>
     </div>
   );
